@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveRecorder - 直播录制管理</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        [v-cloak] { display: none; }
+        .recording-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        .status-online { background-color: #0daa76; }
+        .status-offline { background-color: #6b7280; }
+        .status-recording { background-color: #ef4444; }
+        .log-line {
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="app" v-cloak>
+        <!-- 顶部导航 -->
+        <nav class="bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg">
+            <div class="container mx-auto px-4 py-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zM14.553 7.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z"/>
+                        </svg>
+                        <h1 class="text-2xl font-bold">LiveRecorder</h1>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm">连接状态:</span>
+                        <div class="flex items-center space-x-2">
+                            <div :class="wsConnected ? 'bg-green-400' : 'bg-red-400'" class="w-3 h-3 rounded-full recording-pulse"></div>
+                            <span class="text-sm">{{ wsConnected ? '已连接' : '未连接' }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 主要内容 -->
+        <div class="container mx-auto px-4 py-6">
+            <!-- 统计卡片 -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-500 text-sm">监控主播</p>
+                            <p class="text-3xl font-bold text-blue-600">{{ stats.totalUsers }}</p>
+                        </div>
+                        <svg class="w-12 h-12 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-500 text-sm">正在录制</p>
+                            <p class="text-3xl font-bold text-red-600">{{ stats.recording }}</p>
+                        </div>
+                        <svg class="w-12 h-12 text-red-400 recording-pulse" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-500 text-sm">录制文件</p>
+                            <p class="text-3xl font-bold text-green-600">{{ stats.files }}</p>
+                        </div>
+                        <svg class="w-12 h-12 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-gray-500 text-sm">存储空间</p>
+                            <p class="text-3xl font-bold text-purple-600">{{ stats.totalSize }}</p>
+                        </div>
+                        <svg class="w-12 h-12 text-purple-400" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M3 12v3c0 1.657 3.134 3 7 3s7-1.343 7-3v-3c0 1.657-3.134 3-7 3s-7-1.343-7-3z"/>
+                            <path d="M3 7v3c0 1.657 3.134 3 7 3s7-1.343 7-3V7c0 1.657-3.134 3-7 3S3 8.657 3 7z"/>
+                            <path d="M17 5c0 1.657-3.134 3-7 3S3 6.657 3 5s3.134-3 7-3 7 1.343 7 3z"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 标签页 -->
+            <div class="bg-white rounded-lg shadow-md mb-6">
+                <div class="border-b border-gray-200">
+                    <nav class="flex -mb-px">
+                        <button @click="currentTab = 'status'" 
+                                :class="currentTab === 'status' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-3 border-b-2 font-medium text-sm">
+                            录制状态
+                        </button>
+                        <button @click="currentTab = 'config'" 
+                                :class="currentTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-3 border-b-2 font-medium text-sm">
+                            配置管理
+                        </button>
+                        <button @click="currentTab = 'files'" 
+                                :class="currentTab === 'files' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-3 border-b-2 font-medium text-sm">
+                            录制文件
+                        </button>
+                        <button @click="currentTab = 'logs'" 
+                                :class="currentTab === 'logs' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-3 border-b-2 font-medium text-sm">
+                            实时日志
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- 录制状态标签页 -->
+                <div v-show="currentTab === 'status'" class="p-6">
+                    <div v-if="!config.users || config.users.length === 0" class="text-center py-12">
+                        <div class="max-w-md mx-auto">
+                            <svg class="w-24 h-24 mx-auto mb-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                            </svg>
+                            <h3 class="text-2xl font-bold text-gray-800 mb-2">欢迎使用 LiveRecorder</h3>
+                            <p class="text-gray-600 mb-6">开始添加你想要录制的直播主播吧！</p>
+                            <button @click="currentTab = 'config'; addUser()" 
+                                    class="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 shadow-lg transform hover:scale-105 transition-all">
+                                <svg class="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                </svg>
+                                添加第一个主播
+                            </button>
+                            <div class="mt-8 text-left bg-blue-50 rounded-lg p-4">
+                                <h4 class="font-semibold text-blue-900 mb-2">💡 快速开始：</h4>
+                                <ol class="text-sm text-blue-800 space-y-1 list-decimal list-inside">
+                                    <li>点击上方按钮添加主播</li>
+                                    <li>选择平台（如 Bilibili、Douyu 等）</li>
+                                    <li>输入房间ID和主播名</li>
+                                    <li>点击"保存配置"</li>
+                                    <li>重启服务后自动开始监控录制</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div v-for="user in config.users" :key="user.platform + user.id" 
+                             class="border border-gray-200 rounded-lg p-4 hover:shadow-lg transition-shadow">
+                            <div class="flex items-start justify-between mb-3">
+                                <div class="flex items-center space-x-3">
+                                    <div :class="getStatusClass(user)" class="w-4 h-4 rounded-full"></div>
+                                    <div>
+                                        <h3 class="font-bold text-lg">{{ user.name || user.id }}</h3>
+                                        <p class="text-sm text-gray-500">{{ user.platform }}</p>
+                                    </div>
+                                </div>
+                                <span class="px-2 py-1 text-xs rounded-full"
+                                      :class="isRecording(user) ? 'bg-red-100 text-red-800 recording-pulse' : 'bg-gray-100 text-gray-800'">
+                                    {{ isRecording(user) ? '🔴 录制中' : '⏸️ 待机' }}
+                                </span>
+                            </div>
+                            <div class="space-y-2 text-sm mb-3">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">房间ID:</span>
+                                    <span class="font-mono">{{ user.id }}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">检测间隔:</span>
+                                    <span>{{ user.interval || 10 }}秒</span>
+                                </div>
+                                <div v-if="user.format" class="flex justify-between">
+                                    <span class="text-gray-600">输出格式:</span>
+                                    <span class="uppercase">{{ user.format }}</span>
+                                </div>
+                            </div>
+                            <!-- 控制按钮 -->
+                            <div class="flex space-x-2 pt-3 border-t">
+                                <button v-if="!isRecording(user)" 
+                                        @click="startRecording(user)"
+                                        class="flex-1 px-3 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 flex items-center justify-center">
+                                    <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
+                                    </svg>
+                                    开始录制
+                                </button>
+                                <button v-else 
+                                        @click="stopRecording(user)"
+                                        class="flex-1 px-3 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 flex items-center justify-center">
+                                    <svg class="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd"/>
+                                    </svg>
+                                    停止录制
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 配置管理标签页 -->
+                <div v-show="currentTab === 'config'" class="p-6">
+                    <div class="mb-6">
+                        <h3 class="text-lg font-bold mb-4">全局配置</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">代理地址（不使用留空）</label>
+                                <input v-model="config.global.proxy" type="text" 
+                                       placeholder="留空或 http://127.0.0.1:7890"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <p class="text-xs text-gray-500 mt-1">留空表示不使用代理</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">输出目录</label>
+                                <input v-model="config.global.output" type="text" 
+                                       placeholder="output"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-bold">主播列表</h3>
+                            <button @click="showAddForm = true" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center">
+                                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                </svg>
+                                添加主播
+                            </button>
+                        </div>
+
+                        <!-- 添加/编辑表单 -->
+                        <div v-if="showAddForm || editingIndex !== null" class="mb-6 bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-900 mb-3">{{ editingIndex !== null ? '编辑主播' : '添加新主播' }}</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">平台 *</label>
+                                    <select v-model="editingUser.platform" 
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        <option v-for="platform in platforms" :key="platform" :value="platform">
+                                            {{ platform }}
+                                        </option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">房间ID *</label>
+                                    <input v-model="editingUser.id" type="text" placeholder="必填"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">主播名 *</label>
+                                    <input v-model="editingUser.name" type="text" placeholder="必填"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">检测间隔(秒)</label>
+                                    <input v-model.number="editingUser.interval" type="number" placeholder="10"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">输出格式（可选）</label>
+                                    <input v-model="editingUser.format" type="text" placeholder="mp4, flv, ts..."
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div class="flex items-end space-x-2">
+                                    <button @click="saveEditingUser" 
+                                            class="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
+                                        {{ editingIndex !== null ? '保存' : '添加' }}
+                                    </button>
+                                    <button @click="cancelEditing" 
+                                            class="flex-1 px-4 py-2 bg-gray-400 text-white rounded-md hover:bg-gray-500">
+                                        取消
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 主播列表表格 -->
+                        <div v-if="config.users && config.users.length > 0" class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">平台</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">房间ID</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">主播名</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">检测间隔</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">输出格式</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <tr v-for="(user, index) in config.users" :key="index" class="hover:bg-gray-50">
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                                                {{ user.platform }}
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ user.id }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold">{{ user.name }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ user.interval || 10 }}秒</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ user.format || '-' }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
+                                            <button @click="editUser(index)" 
+                                                    class="px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600">
+                                                编辑
+                                            </button>
+                                            <button @click="removeUser(index)" 
+                                                    class="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700">
+                                                删除
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div v-else class="text-center py-8 text-gray-500">
+                            <p>还没有添加主播，点击上方"添加主播"按钮开始</p>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-center mt-6 pt-4 border-t">
+                        <div class="text-sm text-gray-600">
+                            <p>💡 提示：保存配置后，需要重启服务才能生效</p>
+                            <p class="text-xs mt-1">系统会自动监控主播状态，检测到开播后自动开始录制</p>
+                        </div>
+                        <div class="flex space-x-4">
+                            <button @click="loadConfig" class="px-6 py-2 border border-gray-300 rounded-md hover:bg-gray-50">
+                                重新加载
+                            </button>
+                            <button @click="saveConfig" class="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center">
+                                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
+                                </svg>
+                                保存配置
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 录制文件标签页 -->
+                <div v-show="currentTab === 'files'" class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold">录制文件列表</h3>
+                        <button @click="loadFiles" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50">
+                            刷新
+                        </button>
+                    </div>
+
+                    <div v-if="files.length === 0" class="text-center py-12 text-gray-500">
+                        <svg class="w-16 h-16 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                        </svg>
+                        <p class="text-lg">暂无录制文件</p>
+                    </div>
+
+                    <div v-else class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">文件名</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">大小</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">修改时间</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <tr v-for="file in files" :key="file.name" class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono">{{ file.name }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm">{{ file.size_mb }} MB</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm">{{ formatDate(file.created) }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm">{{ formatDate(file.modified) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 实时日志标签页 -->
+                <div v-show="currentTab === 'logs'" class="p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold">实时日志</h3>
+                        <div class="flex space-x-2">
+                            <button @click="autoScroll = !autoScroll" 
+                                    :class="autoScroll ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'"
+                                    class="px-4 py-2 rounded-md text-sm">
+                                {{ autoScroll ? '自动滚动：开' : '自动滚动：关' }}
+                            </button>
+                            <button @click="loadLogs" class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50">
+                                刷新
+                            </button>
+                        </div>
+                    </div>
+
+                    <div ref="logContainer" class="bg-gray-900 text-green-400 rounded-lg p-4 h-96 overflow-y-auto font-mono text-sm">
+                        <div v-for="(log, index) in logs" :key="index" class="mb-1">
+                            {{ log }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 通知提示 -->
+        <div v-if="notification.show" 
+             class="fixed bottom-4 right-4 px-6 py-4 rounded-lg shadow-lg transition-all"
+             :class="notification.type === 'success' ? 'bg-green-500' : 'bg-red-500'"
+             style="color: white;">
+            {{ notification.message }}
+        </div>
+    </div>
+
+    <script src="static/js/app.js"></script>
+</body>
+</html>
